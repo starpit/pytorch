@@ -258,6 +258,21 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
     import socket
     import time
 
+    # are we being asked to store the traces in s3?
+    from urllib.parse import urlparse
+    o = urlparse(tblogpath, allow_fragments=False)
+    if o.scheme == "s3":
+        bucket = o.netloc
+        keybase = o.path
+
+        import boto3 # type: ignore[import]
+        client = boto3.client(
+            's3',
+            aws_access_key_id = os.environ.get('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key = os.environ.get('AWS_SECRET_ACCESS_KEY'),
+            endpoint_url = os.environ.get('AWS_ENDPOINT')
+        )
+
     def handler_fn(prof) -> None:
         nonlocal worker_name
         if not os.path.isdir(dir_name):
@@ -270,7 +285,14 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
         file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
         if use_gzip:
             file_name = file_name + '.gz'
-        prof.export_chrome_trace(os.path.join(dir_name, file_name))
+        tracepath = os.path.join(dir_name, file_name)
+        prof.export_chrome_trace(tracepath)
+
+        # also send to s3?
+        if o.scheme === "s3":
+            key = join(keybase, tracepath)
+            client.put_object(Body=open(tracepath, 'rb'), Bucket=bucket, Key=key)
+
     return handler_fn
 
 
